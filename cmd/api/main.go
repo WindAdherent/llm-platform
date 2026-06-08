@@ -8,6 +8,7 @@ import (
 	"github.com/WindAdherent/llm-platform/internal/config"
 	"github.com/WindAdherent/llm-platform/internal/database"
 	"github.com/WindAdherent/llm-platform/internal/server"
+	"github.com/WindAdherent/llm-platform/internal/storage"
 )
 
 func main() {
@@ -36,7 +37,16 @@ func main() {
 	}
 	defer rdb.Close()
 
-	r := server.NewRouter(cfg, db, rdb)
+	objectStorage, err := storage.ConnectMinIO(ctx, cfg)
+	if err != nil {
+		log.Fatalf("failed to connect minio: %v", err)
+	}
+
+	if err := objectStorage.EnsureBucket(ctx); err != nil {
+		log.Fatalf("failed to ensure minio bucket: %v", err)
+	}
+
+	r := server.NewRouter(cfg, db, rdb, objectStorage)
 
 	log.Printf("Starting %s on %s, env=%s", cfg.AppName, cfg.HTTPAddr(), cfg.AppEnv)
 

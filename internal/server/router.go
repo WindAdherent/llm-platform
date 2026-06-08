@@ -9,9 +9,10 @@ import (
 
 	"github.com/WindAdherent/llm-platform/internal/api"
 	"github.com/WindAdherent/llm-platform/internal/config"
+	"github.com/WindAdherent/llm-platform/internal/storage"
 )
 
-func NewRouter(cfg config.Config, db *gorm.DB, rdb *redis.Client) *gin.Engine {
+func NewRouter(cfg config.Config, db *gorm.DB, rdb *redis.Client, objectStorage *storage.ObjectStorage) *gin.Engine {
 	if cfg.AppEnv == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -22,6 +23,7 @@ func NewRouter(cfg config.Config, db *gorm.DB, rdb *redis.Client) *gin.Engine {
 		sqlDB, err := db.DB()
 		mysqlStatus := "ok"
 		redisStatus := "ok"
+		minioStatus := "ok"
 
 		if err != nil {
 			mysqlStatus = "error"
@@ -33,10 +35,14 @@ func NewRouter(cfg config.Config, db *gorm.DB, rdb *redis.Client) *gin.Engine {
 			redisStatus = "down"
 		}
 
+		if err := objectStorage.Health(c.Request.Context()); err != nil {
+			minioStatus = "down"
+		}
+
 		status := "ok"
 		httpStatus := http.StatusOK
 
-		if mysqlStatus != "ok" || redisStatus != "ok" {
+		if mysqlStatus != "ok" || redisStatus != "ok" || minioStatus != "ok" {
 			status = "error"
 			httpStatus = http.StatusServiceUnavailable
 		}
@@ -47,6 +53,7 @@ func NewRouter(cfg config.Config, db *gorm.DB, rdb *redis.Client) *gin.Engine {
 			"env":    cfg.AppEnv,
 			"mysql":  mysqlStatus,
 			"redis":  redisStatus,
+			"minio":  minioStatus,
 		})
 	})
 
@@ -73,6 +80,14 @@ func NewRouter(cfg config.Config, db *gorm.DB, rdb *redis.Client) *gin.Engine {
 			tasks.GET("", taskHandler.ListTasks)
 			tasks.GET("/:id", taskHandler.GetTask)
 			tasks.PATCH("/:id", taskHandler.UpdateTask)
+		}
+
+		objectHandler := api.NewObjectHandler(objectStorage)
+		objects := apiV1.Group("/objects")
+		{
+			objects.POST("/upload", objectHandler.UploadObject)
+			objects.GET("", objectHandler.ListObjects)
+			objects.GET("/presigned-url", objectHandler.PresignedGetObjectURL)
 		}
 	}
 
