@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"log"
 	"os"
 
@@ -41,10 +42,10 @@ func Load() Config {
 		AppHost: getEnv("APP_HOST", "0.0.0.0"),
 		AppPort: getEnv("APP_PORT", "8080"),
 
-		MySQLHost:     getEnv("MYSQL_HOST", "127.0.0.1"),
+		MySQLHost:     getEnv("MYSQL_HOST", "47.94.178.189"),
 		MySQLPort:     getEnv("MYSQL_PORT", "3306"),
-		MySQLUser:     getEnv("MYSQL_USER", "root"),
-		MySQLPassword: getEnv("MYSQL_PASSWORD", ""),
+		MySQLUser:     getEnv("MYSQL_USER", "llm_platform"),
+		MySQLPassword: getEnv("MYSQL_PASSWORD", "&shieshuyuan21"),
 		MySQLDatabase: getEnv("MYSQL_DATABASE", "llm_platform"),
 
 		RedisHost:     getEnv("REDIS_HOST", "127.0.0.1"),
@@ -57,6 +58,21 @@ func Load() Config {
 		MinIOBucket:    getEnv("MINIO_BUCKET", "llm-platform"),
 		MinIOUseSSL:    getEnv("MINIO_USE_SSL", "false"),
 	}
+}
+
+func (c Config) MySQLDSN() string {
+	return fmt.Sprintf(
+		"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+		c.MySQLUser,
+		c.MySQLPassword,
+		c.MySQLHost,
+		c.MySQLPort,
+		c.MySQLDatabase,
+	)
+}
+
+func (c Config) HTTPAddr() string {
+	return fmt.Sprintf("%s:%s", c.AppHost, c.AppPort)
 }
 
 func getEnv(key string, fallback string) string {

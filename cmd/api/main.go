@@ -1,22 +1,36 @@
 package main
 
 import (
-	"fmt"
 	"log"
 
 	"github.com/WindAdherent/llm-platform/internal/config"
+	"github.com/WindAdherent/llm-platform/internal/database"
 	"github.com/WindAdherent/llm-platform/internal/server"
 )
 
 func main() {
 	cfg := config.Load()
 
-	r := server.NewRouter(cfg)
+	db, err := database.ConnectMySQL(cfg)
+	if err != nil {
+		log.Fatalf("failed to connect mysql: %v", err)
+	}
 
-	addr := fmt.Sprintf("%s:%s", cfg.AppHost, cfg.AppPort)
-	log.Printf("Starting %s on %s, env=%s", cfg.AppName, addr, cfg.AppEnv)
+	if err := database.AutoMigrate(db); err != nil {
+		log.Fatalf("failed to run database migration: %v", err)
+	}
 
-	if err := r.Run(addr); err != nil {
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Fatalf("failed to get raw database connection: %v", err)
+	}
+	defer sqlDB.Close()
+
+	r := server.NewRouter(cfg, db)
+
+	log.Printf("Starting %s on %s, env=%s", cfg.AppName, cfg.HTTPAddr(), cfg.AppEnv)
+
+	if err := r.Run(cfg.HTTPAddr()); err != nil {
 		log.Fatalf("failed to start server: %v", err)
 	}
 }
