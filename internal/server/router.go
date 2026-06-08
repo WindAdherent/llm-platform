@@ -4,13 +4,14 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
 	"github.com/WindAdherent/llm-platform/internal/api"
 	"github.com/WindAdherent/llm-platform/internal/config"
 )
 
-func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
+func NewRouter(cfg config.Config, db *gorm.DB, rdb *redis.Client) *gin.Engine {
 	if cfg.AppEnv == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -19,33 +20,33 @@ func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 
 	r.GET("/healthz", func(c *gin.Context) {
 		sqlDB, err := db.DB()
+		mysqlStatus := "ok"
+		redisStatus := "ok"
+
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"status": "error",
-				"app":    cfg.AppName,
-				"env":    cfg.AppEnv,
-				"mysql":  "error",
-				"error":  err.Error(),
-			})
-			return
+			mysqlStatus = "error"
+		} else if err := sqlDB.Ping(); err != nil {
+			mysqlStatus = "down"
 		}
 
-		if err := sqlDB.Ping(); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"status": "error",
-				"app":    cfg.AppName,
-				"env":    cfg.AppEnv,
-				"mysql":  "down",
-				"error":  err.Error(),
-			})
-			return
+		if err := rdb.Ping(c.Request.Context()).Err(); err != nil {
+			redisStatus = "down"
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"status": "ok",
+		status := "ok"
+		httpStatus := http.StatusOK
+
+		if mysqlStatus != "ok" || redisStatus != "ok" {
+			status = "error"
+			httpStatus = http.StatusServiceUnavailable
+		}
+
+		c.JSON(httpStatus, gin.H{
+			"status": status,
 			"app":    cfg.AppName,
 			"env":    cfg.AppEnv,
-			"mysql":  "ok",
+			"mysql":  mysqlStatus,
+			"redis":  redisStatus,
 		})
 	})
 
@@ -58,12 +59,20 @@ func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 		})
 
 		modelHandler := api.NewModelHandler(db)
-
 		models := apiV1.Group("/models")
 		{
 			models.POST("", modelHandler.CreateModel)
 			models.GET("", modelHandler.ListModels)
 			models.GET("/:id", modelHandler.GetModel)
+		}
+
+		taskHandler := api.NewTaskHandler(db, rdb)
+		tasks := apiV1.Group("/tasks")
+		{
+			tasks.POST("", taskHandler.CreateTask)
+			tasks.GET("", taskHandler.ListTasks)
+			tasks.GET("/:id", taskHandler.GetTask)
+			tasks.PATCH("/:id", taskHandler.UpdateTask)
 		}
 	}
 

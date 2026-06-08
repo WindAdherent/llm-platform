@@ -10,5 +10,6 @@ func AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&domain.Model{},
 		&domain.ModelVersion{},
+		&domain.Task{},
 	)
 }
