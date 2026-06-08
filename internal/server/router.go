@@ -66,11 +66,15 @@ func NewRouter(cfg config.Config, db *gorm.DB, rdb *redis.Client, objectStorage 
 		})
 
 		modelHandler := api.NewModelHandler(db)
+		modelDownloadHandler := api.NewModelDownloadHandler(db, rdb)
 		models := apiV1.Group("/models")
 		{
 			models.POST("", modelHandler.CreateModel)
 			models.GET("", modelHandler.ListModels)
 			models.GET("/:id", modelHandler.GetModel)
+
+			models.POST("/:model_id/versions/:version_id/download", modelDownloadHandler.StartModelVersionDownload)
+			models.POST("/:model_id/versions/:version_id/download/complete", modelDownloadHandler.CompleteModelVersionDownload)
 		}
 
 		taskHandler := api.NewTaskHandler(db, rdb)
