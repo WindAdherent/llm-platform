@@ -20,3 +20,12 @@ test:
 .PHONY: fmt
 fmt:
 	go fmt ./...
+
+.PHONY: worker
+worker:
+	go run ./cmd/worker
+
+.PHONY: build-worker
+build-worker:
+	mkdir -p bin
+	go build -o bin/worker ./cmd/worker

@@ -113,6 +113,17 @@ func (h *ModelDownloadHandler) StartModelVersionDownload(c *gin.Context) {
 		localPath = defaultModelLocalPath(model, version)
 	}
 
+	payloadJSON := mapToJSONStringPtr(map[string]interface{}{
+		"model_id":         modelID,
+		"model_version_id": versionID,
+		"model_name":       model.Name,
+		"version_name":     version.VersionName,
+		"source_type":      model.SourceType,
+		"source_uri":       model.SourceURI,
+		"revision":         version.Revision,
+		"local_path":       localPath,
+	})
+
 	task := domain.Task{
 		TaskType: "MODEL_DOWNLOAD",
 		Status:   "PENDING",
@@ -123,6 +134,7 @@ func (h *ModelDownloadHandler) StartModelVersionDownload(c *gin.Context) {
 			version.VersionName,
 			model.SourceURI,
 		),
+		PayloadJSON: payloadJSON,
 	}
 
 	if err := h.db.Transaction(func(tx *gorm.DB) error {

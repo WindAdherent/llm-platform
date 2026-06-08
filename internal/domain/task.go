@@ -9,6 +9,7 @@ type Task struct {
 	Progress     int        `gorm:"not null;default:0" json:"progress"`
 	Message      string     `gorm:"size:1024" json:"message"`
 	ErrorMessage string     `gorm:"size:2048" json:"error_message"`
+	PayloadJSON  *string    `gorm:"type:json" json:"payload_json,omitempty"`
 	ResultJSON   *string    `gorm:"type:json" json:"result_json,omitempty"`
 	CreatedBy    string     `gorm:"size:128" json:"created_by"`
 	StartedAt    *time.Time `json:"started_at"`
