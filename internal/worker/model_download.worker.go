@@ -1,23 +1,28 @@
 package worker
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"os/exec"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
 	platformcache "github.com/WindAdherent/llm-platform/internal/cache"
+	"github.com/WindAdherent/llm-platform/internal/config"
 	"github.com/WindAdherent/llm-platform/internal/domain"
 )
 
 type ModelDownloadWorker struct {
 	db           *gorm.DB
 	taskCache    *platformcache.TaskCache
+	cfg          config.Config
 	pollInterval time.Duration
 }
 
@@ -32,11 +37,12 @@ type ModelDownloadPayload struct {
 	LocalPath      string `json:"local_path"`
 }
 
-func NewModelDownloadWorker(db *gorm.DB, taskCache *platformcache.TaskCache) *ModelDownloadWorker {
+func NewModelDownloadWorker(db *gorm.DB, taskCache *platformcache.TaskCache, cfg config.Config) *ModelDownloadWorker {
 	return &ModelDownloadWorker{
 		db:           db,
 		taskCache:    taskCache,
-		pollInterval: 3 * time.Second,
+		cfg:          cfg,
+		pollInterval: 10 * time.Second,
 	}
 }
 
@@ -81,7 +87,14 @@ func (w *ModelDownloadWorker) processOnce(ctx context.Context) error {
 		return w.failTask(ctx, task.ID, 0, "invalid model download payload", err)
 	}
 
-	return w.simulateDownload(ctx, task.ID, payload)
+	switch w.cfg.ModelDownloadMode {
+	case "simulated", "":
+		return w.simulateDownload(ctx, task.ID, payload)
+	case "local":
+		return w.runLocalDownloader(ctx, task.ID, payload)
+	default:
+		return w.failTask(ctx, task.ID, payload.ModelVersionID, "unsupported model download mode", fmt.Errorf("unsupported MODEL_DOWNLOAD_MODE=%s", w.cfg.ModelDownloadMode))
+	}
 }
 
 func (w *ModelDownloadWorker) claimPendingTask(ctx context.Context) (domain.Task, bool, error) {
@@ -189,6 +202,133 @@ func (w *ModelDownloadWorker) simulateDownload(ctx context.Context, taskID uint,
 	}
 
 	return w.completeTask(ctx, taskID, payload)
+}
+
+type DownloaderEvent struct {
+	Type           string `json:"type"`
+	Progress       int    `json:"progress"`
+	Message        string `json:"message"`
+	Error          string `json:"error"`
+	LocalPath      string `json:"local_path"`
+	ResultPath     string `json:"result_path"`
+	DownloadedPath string `json:"downloaded_path"`
+}
+
+func (w *ModelDownloadWorker) runLocalDownloader(ctx context.Context, taskID uint, payload ModelDownloadPayload) error {
+	args := strings.Fields(w.cfg.ModelDownloaderCommand)
+	if len(args) == 0 {
+		return w.failTask(ctx, taskID, payload.ModelVersionID, "model downloader command is empty", fmt.Errorf("MODEL_DOWNLOADER_COMMAND is empty"))
+	}
+
+	args = append(args,
+		"--source-type", payload.SourceType,
+		"--source-uri", payload.SourceURI,
+		"--revision", payload.Revision,
+		"--local-path", payload.LocalPath,
+	)
+
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return w.failTask(ctx, taskID, payload.ModelVersionID, "failed to create downloader stdout pipe", err)
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return w.failTask(ctx, taskID, payload.ModelVersionID, "failed to create downloader stderr pipe", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return w.failTask(ctx, taskID, payload.ModelVersionID, "failed to start model downloader", err)
+	}
+
+	stderrDone := make(chan struct{})
+	go func() {
+		defer close(stderrDone)
+
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			log.Printf("model downloader stderr, task_id=%d: %s", taskID, scanner.Text())
+		}
+	}()
+
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		var event DownloaderEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			log.Printf("model downloader non-json output, task_id=%d: %s", taskID, line)
+			continue
+		}
+
+		if err := w.handleDownloaderEvent(ctx, taskID, payload, event); err != nil {
+			log.Printf("failed to handle downloader event, task_id=%d, err=%v", taskID, err)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		_ = cmd.Process.Kill()
+		return w.failTask(ctx, taskID, payload.ModelVersionID, "failed to read downloader output", err)
+	}
+
+	err = cmd.Wait()
+	<-stderrDone
+
+	if err != nil {
+		return w.failTask(ctx, taskID, payload.ModelVersionID, "model downloader command failed", err)
+	}
+
+	return w.completeTask(ctx, taskID, payload)
+}
+
+func (w *ModelDownloadWorker) handleDownloaderEvent(ctx context.Context, taskID uint, payload ModelDownloadPayload, event DownloaderEvent) error {
+	message := event.Message
+	if message == "" {
+		message = fmt.Sprintf("downloader event: %s", event.Type)
+	}
+
+	progress := event.Progress
+	if progress < 0 {
+		progress = 0
+	}
+	if progress > 99 {
+		progress = 99
+	}
+
+	switch event.Type {
+	case "started", "progress":
+		task, err := w.updateTaskProgress(ctx, taskID, progress, message)
+		if err != nil {
+			return err
+		}
+
+		return w.cacheTask(ctx, task)
+
+	case "failed":
+		cause := fmt.Errorf(event.Error)
+		if event.Error == "" {
+			cause = fmt.Errorf("model downloader reported failure")
+		}
+
+		return w.failTask(ctx, taskID, payload.ModelVersionID, message, cause)
+
+	case "completed":
+		task, err := w.updateTaskProgress(ctx, taskID, 99, message)
+		if err != nil {
+			return err
+		}
+
+		return w.cacheTask(ctx, task)
+
+	default:
+		log.Printf("unknown downloader event type, task_id=%d, type=%s", taskID, event.Type)
+		return nil
+	}
 }
 
 func (w *ModelDownloadWorker) updateTaskProgress(ctx context.Context, taskID uint, progress int, message string) (domain.Task, error) {

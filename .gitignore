@@ -1,11 +1,13 @@
 # env
 .env
 .env.local
+.venv
 
 # build
 bin/
 dist/
 tmp/
+data/
 
 # macOS
 .DS_Store

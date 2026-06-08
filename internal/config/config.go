@@ -29,6 +29,9 @@ type Config struct {
 	MinIOSecretKey string
 	MinIOBucket    string
 	MinIOUseSSL    string
+
+	ModelDownloadMode      string
+	ModelDownloaderCommand string
 }
 
 func Load() Config {
@@ -57,6 +60,9 @@ func Load() Config {
 		MinIOSecretKey: getEnv("MINIO_SECRET_KEY", "minioadmin"),
 		MinIOBucket:    getEnv("MINIO_BUCKET", "llm-platform"),
 		MinIOUseSSL:    getEnv("MINIO_USE_SSL", "false"),
+
+		ModelDownloadMode:      getEnv("MODEL_DOWNLOAD_MODE", "simulated"),
+		ModelDownloaderCommand: getEnv("MODEL_DOWNLOADER_COMMAND", "python3 build/model-downloader/downloader.py"),
 	}
 }
 

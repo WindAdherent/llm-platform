@@ -1,16 +1,31 @@
 package database
 
 import (
+	stdlog "log"
+	"os"
 	"time"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	"github.com/WindAdherent/llm-platform/internal/config"
 )
 
 func ConnectMySQL(cfg config.Config) (*gorm.DB, error) {
-	db, err := gorm.Open(mysql.Open(cfg.MySQLDSN()), &gorm.Config{})
+	gormLogger := logger.New(
+		stdlog.New(os.Stdout, "\r\n", stdlog.LstdFlags),
+		logger.Config{
+			SlowThreshold:             time.Second,
+			LogLevel:                  logger.Warn,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  true,
+		},
+	)
+
+	db, err := gorm.Open(mysql.Open(cfg.MySQLDSN()), &gorm.Config{
+		Logger: gormLogger,
+	})
 	if err != nil {
 		return nil, err
 	}

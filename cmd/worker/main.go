@@ -42,7 +42,7 @@ func main() {
 	defer rdb.Close()
 
 	taskCache := cache.NewTaskCache(rdb)
-	modelDownloadWorker := worker.NewModelDownloadWorker(db, taskCache)
+	modelDownloadWorker := worker.NewModelDownloadWorker(db, taskCache, cfg)
 
 	if err := modelDownloadWorker.Run(ctx); err != nil {
 		if errors.Is(err, context.Canceled) {
