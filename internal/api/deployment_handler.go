@@ -27,8 +27,13 @@ type CreateDeploymentRequest struct {
 	Replicas        int    `json:"replicas"`
 	Description     string `json:"description"`
 
-	Image                string                 `json:"image"`
-	Port                 int                    `json:"port"`
+	Image string `json:"image"`
+	Port  int    `json:"port"`
+
+	ContainerPort int  `json:"container_port"`
+	ServicePort   int  `json:"service_port"`
+	HostPort      *int `json:"host_port"`
+
 	TensorParallelSize   int                    `json:"tensor_parallel_size"`
 	PipelineParallelSize int                    `json:"pipeline_parallel_size"`
 	GPUMemoryUtilization float64                `json:"gpu_memory_utilization"`
@@ -59,6 +64,13 @@ func (h *DeploymentHandler) CreateDeployment(c *gin.Context) {
 	}
 
 	normalizeCreateDeploymentRequest(&req)
+
+	if err := validateCreateDeploymentRequest(req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
 
 	if !isSupportedRuntimeType(req.RuntimeType) {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -127,7 +139,9 @@ func (h *DeploymentHandler) CreateDeployment(c *gin.Context) {
 
 	runtimeConfig := domain.DeploymentRuntimeConfig{
 		Image:                req.Image,
-		Port:                 req.Port,
+		ContainerPort:        req.ContainerPort,
+		ServicePort:          req.ServicePort,
+		HostPort:             req.HostPort,
 		TensorParallelSize:   req.TensorParallelSize,
 		PipelineParallelSize: req.PipelineParallelSize,
 		GPUMemoryUtilization: req.GPUMemoryUtilization,
@@ -170,6 +184,8 @@ func (h *DeploymentHandler) CreateDeployment(c *gin.Context) {
 		return
 	}
 
+	decorateDeployment(&deployment)
+
 	c.JSON(http.StatusCreated, deployment)
 }
 
@@ -186,6 +202,10 @@ func (h *DeploymentHandler) ListDeployments(c *gin.Context) {
 			"details": err.Error(),
 		})
 		return
+	}
+
+	for i := range deployments {
+		decorateDeployment(&deployments[i])
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -222,6 +242,8 @@ func (h *DeploymentHandler) GetDeployment(c *gin.Context) {
 		return
 	}
 
+	decorateDeployment(&deployment)
+
 	c.JSON(http.StatusOK, deployment)
 }
 
@@ -230,6 +252,9 @@ type UpdateDeploymentConfigRequest struct {
 	Description          *string                `json:"description"`
 	Image                *string                `json:"image"`
 	Port                 *int                   `json:"port"`
+	ContainerPort        *int                   `json:"container_port"`
+	ServicePort          *int                   `json:"service_port"`
+	HostPort             *int                   `json:"host_port"`
 	TensorParallelSize   *int                   `json:"tensor_parallel_size"`
 	PipelineParallelSize *int                   `json:"pipeline_parallel_size"`
 	GPUMemoryUtilization *float64               `json:"gpu_memory_utilization"`
@@ -314,13 +339,37 @@ func (h *DeploymentHandler) UpdateDeploymentConfig(c *gin.Context) {
 	}
 
 	if req.Port != nil {
-		if *req.Port <= 0 || *req.Port > 65535 {
+		req.ContainerPort = req.Port
+	}
+
+	if req.ContainerPort != nil {
+		if *req.ContainerPort <= 0 || *req.ContainerPort > 65535 {
 			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "port must be between 1 and 65535",
+				"error": "container_port must be between 1 and 65535",
 			})
 			return
 		}
-		configUpdates["port"] = *req.Port
+		configUpdates["container_port"] = *req.ContainerPort
+	}
+
+	if req.ServicePort != nil {
+		if *req.ServicePort <= 0 || *req.ServicePort > 65535 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "service_port must be between 1 and 65535",
+			})
+			return
+		}
+		configUpdates["service_port"] = *req.ServicePort
+	}
+
+	if req.HostPort != nil {
+		if *req.HostPort <= 0 || *req.HostPort > 65535 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "host_port must be between 1 and 65535",
+			})
+			return
+		}
+		configUpdates["host_port"] = *req.HostPort
 	}
 
 	if req.TensorParallelSize != nil {
@@ -437,6 +486,8 @@ func (h *DeploymentHandler) UpdateDeploymentConfig(c *gin.Context) {
 		return
 	}
 
+	decorateDeployment(&deployment)
+
 	c.JSON(http.StatusOK, deployment)
 }
 
@@ -478,11 +529,18 @@ func (h *DeploymentHandler) GetRuntimeCommand(c *gin.Context) {
 
 	command, shellCommand := buildVLLMCommand(deployment)
 
+	decorateDeployment(&deployment)
+
 	c.JSON(http.StatusOK, gin.H{
-		"deployment_id": deployment.ID,
-		"runtime_type":  deployment.RuntimeType,
-		"command":       command,
-		"shell":         shellCommand,
+		"deployment_id":         deployment.ID,
+		"runtime_type":          deployment.RuntimeType,
+		"accelerator_type":      deployment.AcceleratorType,
+		"container_port":        deployment.RuntimeConfig.ContainerPort,
+		"service_port":          deployment.RuntimeConfig.ServicePort,
+		"host_port":             deployment.RuntimeConfig.HostPort,
+		"required_device_count": deployment.RuntimeConfig.RequiredDeviceCount,
+		"command":               command,
+		"shell":                 shellCommand,
 	})
 }
 
@@ -507,8 +565,24 @@ func normalizeCreateDeploymentRequest(req *CreateDeploymentRequest) {
 		}
 	}
 
-	if req.Port == 0 {
-		req.Port = 8000
+	// Deprecated alias: port -> container_port
+	if req.ContainerPort == 0 && req.Port != 0 {
+		req.ContainerPort = req.Port
+	}
+
+	if req.ContainerPort == 0 {
+		req.ContainerPort = 8000
+	}
+
+	if req.ServicePort == 0 {
+		req.ServicePort = req.ContainerPort
+	}
+
+	if req.HostPort != nil {
+		if *req.HostPort <= 0 || *req.HostPort > 65535 {
+			// 这里不直接返回 error，因为 normalize 函数没有返回值。
+			// 严格校验放在 validateCreateDeploymentRequest 里。
+		}
 	}
 
 	if req.TensorParallelSize == 0 {
@@ -530,6 +604,44 @@ func normalizeCreateDeploymentRequest(req *CreateDeploymentRequest) {
 	req.DType = normalizeStringDefault(req.DType, "auto")
 }
 
+func validateCreateDeploymentRequest(req CreateDeploymentRequest) error {
+	if req.ContainerPort <= 0 || req.ContainerPort > 65535 {
+		return fmt.Errorf("container_port must be between 1 and 65535")
+	}
+
+	if req.ServicePort <= 0 || req.ServicePort > 65535 {
+		return fmt.Errorf("service_port must be between 1 and 65535")
+	}
+
+	if req.HostPort != nil {
+		if *req.HostPort <= 0 || *req.HostPort > 65535 {
+			return fmt.Errorf("host_port must be between 1 and 65535")
+		}
+	}
+
+	if req.TensorParallelSize <= 0 {
+		return fmt.Errorf("tensor_parallel_size must be greater than 0")
+	}
+
+	if req.PipelineParallelSize <= 0 {
+		return fmt.Errorf("pipeline_parallel_size must be greater than 0")
+	}
+
+	if req.GPUMemoryUtilization <= 0 || req.GPUMemoryUtilization > 1 {
+		return fmt.Errorf("gpu_memory_utilization must be in (0, 1]")
+	}
+
+	if req.MaxModelLen <= 0 {
+		return fmt.Errorf("max_model_len must be greater than 0")
+	}
+
+	if req.Replicas <= 0 {
+		return fmt.Errorf("replicas must be greater than 0")
+	}
+
+	return nil
+}
+
 func buildVLLMCommand(deployment domain.Deployment) ([]string, string) {
 	cfg := deployment.RuntimeConfig
 	modelPath := deployment.ModelVersion.LocalPath
@@ -539,7 +651,7 @@ func buildVLLMCommand(deployment domain.Deployment) ([]string, string) {
 		"serve",
 		modelPath,
 		"--host", "0.0.0.0",
-		"--port", fmt.Sprintf("%d", cfg.Port),
+		"--port", fmt.Sprintf("%d", cfg.ContainerPort),
 		"--tensor-parallel-size", fmt.Sprintf("%d", cfg.TensorParallelSize),
 		"--pipeline-parallel-size", fmt.Sprintf("%d", cfg.PipelineParallelSize),
 		"--gpu-memory-utilization", fmt.Sprintf("%.2f", cfg.GPUMemoryUtilization),
@@ -603,4 +715,23 @@ func isSupportedAcceleratorType(acceleratorType string) bool {
 	default:
 		return false
 	}
+}
+
+func decorateDeployment(deployment *domain.Deployment) {
+	deployment.RuntimeConfig.RequiredDeviceCount = calculateRequiredDeviceCount(deployment.RuntimeConfig)
+}
+
+func calculateRequiredDeviceCount(cfg domain.DeploymentRuntimeConfig) int {
+	tp := cfg.TensorParallelSize
+	pp := cfg.PipelineParallelSize
+
+	if tp <= 0 {
+		tp = 1
+	}
+
+	if pp <= 0 {
+		pp = 1
+	}
+
+	return tp * pp
 }
