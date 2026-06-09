@@ -29,6 +29,14 @@ type DeploymentRuntimeConfig struct {
 	ServicePort   int  `gorm:"not null;default:8000" json:"service_port"`
 	HostPort      *int `gorm:"default:null" json:"host_port,omitempty"`
 
+	/*
+		docker_host_port
+		k8s_cluster_ip
+		k8s_ingress
+		internal_gateway
+	*/
+	ExposureType string `gorm:"size:32;not null;default:docker_host_port" json:"exposure_type"`
+
 	TensorParallelSize   int     `gorm:"not null;default:1" json:"tensor_parallel_size"`
 	PipelineParallelSize int     `gorm:"not null;default:1" json:"pipeline_parallel_size"`
 	GPUMemoryUtilization float64 `gorm:"not null;default:0.9" json:"gpu_memory_utilization"`

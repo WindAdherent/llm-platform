@@ -34,6 +34,8 @@ type CreateDeploymentRequest struct {
 	ServicePort   int  `json:"service_port"`
 	HostPort      *int `json:"host_port"`
 
+	ExposureType string `json:"exposure_type"`
+
 	TensorParallelSize   int                    `json:"tensor_parallel_size"`
 	PipelineParallelSize int                    `json:"pipeline_parallel_size"`
 	GPUMemoryUtilization float64                `json:"gpu_memory_utilization"`
@@ -142,6 +144,7 @@ func (h *DeploymentHandler) CreateDeployment(c *gin.Context) {
 		ContainerPort:        req.ContainerPort,
 		ServicePort:          req.ServicePort,
 		HostPort:             req.HostPort,
+		ExposureType:         req.ExposureType,
 		TensorParallelSize:   req.TensorParallelSize,
 		PipelineParallelSize: req.PipelineParallelSize,
 		GPUMemoryUtilization: req.GPUMemoryUtilization,
@@ -255,7 +258,9 @@ type UpdateDeploymentConfigRequest struct {
 	ContainerPort *int    `json:"container_port"`
 	ServicePort   *int    `json:"service_port"`
 	HostPort      *int    `json:"host_port"`
+
 	ClearHostPort bool    `json:"clear_host_port"`
+	ExposureType  *string `json:"exposure_type"`
 
 	TensorParallelSize   *int                   `json:"tensor_parallel_size"`
 	PipelineParallelSize *int                   `json:"pipeline_parallel_size"`
@@ -374,6 +379,23 @@ func (h *DeploymentHandler) UpdateDeploymentConfig(c *gin.Context) {
 			return
 		}
 		configUpdates["host_port"] = *req.HostPort
+	}
+
+	if req.ExposureType != nil {
+		exposureType := strings.TrimSpace(*req.ExposureType)
+		if !isSupportedExposureType(exposureType) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "unsupported exposure type",
+				"supported_exposure_types": []string{
+					"docker_host_port",
+					"k8s_cluster_ip",
+					"k8s_ingress",
+					"internal_gateway",
+				},
+			})
+			return
+		}
+		configUpdates["exposure_type"] = exposureType
 	}
 
 	if req.TensorParallelSize != nil {
@@ -542,6 +564,7 @@ func (h *DeploymentHandler) GetRuntimeCommand(c *gin.Context) {
 		"container_port":        deployment.RuntimeConfig.ContainerPort,
 		"service_port":          deployment.RuntimeConfig.ServicePort,
 		"host_port":             deployment.RuntimeConfig.HostPort,
+		"exposure_type":         deployment.RuntimeConfig.ExposureType,
 		"required_device_count": deployment.RuntimeConfig.RequiredDeviceCount,
 		"command":               command,
 		"shell":                 shellCommand,
@@ -589,6 +612,14 @@ func normalizeCreateDeploymentRequest(req *CreateDeploymentRequest) {
 		}
 	}
 
+	if req.ExposureType == "" {
+		if req.HostPort != nil {
+			req.ExposureType = "docker_host_port"
+		} else {
+			req.ExposureType = "k8s_cluster_ip"
+		}
+	}
+
 	if req.TensorParallelSize == 0 {
 		req.TensorParallelSize = 1
 	}
@@ -621,6 +652,14 @@ func validateCreateDeploymentRequest(req CreateDeploymentRequest) error {
 		if *req.HostPort <= 0 || *req.HostPort > 65535 {
 			return fmt.Errorf("host_port must be between 1 and 65535")
 		}
+	}
+
+	if !isSupportedExposureType(req.ExposureType) {
+		return fmt.Errorf("unsupported exposure_type: %s", req.ExposureType)
+	}
+
+	if req.ExposureType == "docker_host_port" && req.HostPort == nil {
+		return fmt.Errorf("host_port is required when exposure_type is docker_host_port")
 	}
 
 	if req.TensorParallelSize <= 0 {
@@ -738,4 +777,13 @@ func calculateRequiredDeviceCount(cfg domain.DeploymentRuntimeConfig) int {
 	}
 
 	return tp * pp
+}
+
+func isSupportedExposureType(exposureType string) bool {
+	switch exposureType {
+	case "docker_host_port", "k8s_cluster_ip", "k8s_ingress", "internal_gateway":
+		return true
+	default:
+		return false
+	}
 }

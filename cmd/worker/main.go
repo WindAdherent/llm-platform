@@ -42,9 +42,21 @@ func main() {
 	defer rdb.Close()
 
 	taskCache := cache.NewTaskCache(rdb)
-	modelDownloadWorker := worker.NewModelDownloadWorker(db, taskCache, cfg)
+	endpointCache := cache.NewRuntimeEndpointCache(rdb)
 
-	if err := modelDownloadWorker.Run(ctx); err != nil {
+	modelDownloadWorker := worker.NewModelDownloadWorker(db, taskCache, cfg)
+	deploymentWorker := worker.NewDeploymentWorker(db, taskCache, endpointCache, cfg)
+
+	errCh := make(chan error, 2)
+	go func() {
+		errCh <- modelDownloadWorker.Run(ctx)
+	}()
+	go func() {
+		errCh <- deploymentWorker.Run(ctx)
+	}()
+
+	err = <-errCh
+	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			log.Println("worker exited")
 			return

@@ -32,6 +32,9 @@ type Config struct {
 
 	ModelDownloadMode      string
 	ModelDownloaderCommand string
+
+	RuntimeHost         string
+	RuntimeK8SNamespace string
 }
 
 func Load() Config {
@@ -63,6 +66,9 @@ func Load() Config {
 
 		ModelDownloadMode:      getEnv("MODEL_DOWNLOAD_MODE", "simulated"),
 		ModelDownloaderCommand: getEnv("MODEL_DOWNLOADER_COMMAND", "python3 build/model-downloader/downloader.py"),
+
+		RuntimeHost:         getEnv("RUNTIME_HOST", "127.0.0.1"),
+		RuntimeK8SNamespace: getEnv("RUNTIME_K8S_NAMESPACE", "llm"),
 	}
 }
 

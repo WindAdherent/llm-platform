@@ -95,6 +95,7 @@ func NewRouter(cfg config.Config, db *gorm.DB, rdb *redis.Client, objectStorage 
 		}
 
 		deploymentHandler := api.NewDeploymentHandler(db)
+		deploymentLifecycleHandler := api.NewDeploymentLifecycleHandler(db, rdb)
 		deployments := apiV1.Group("/deployments")
 		{
 			deployments.POST("", deploymentHandler.CreateDeployment)
@@ -102,6 +103,9 @@ func NewRouter(cfg config.Config, db *gorm.DB, rdb *redis.Client, objectStorage 
 			deployments.GET("/:id", deploymentHandler.GetDeployment)
 			deployments.PATCH("/:id/config", deploymentHandler.UpdateDeploymentConfig)
 			deployments.GET("/:id/runtime-command", deploymentHandler.GetRuntimeCommand)
+
+			deployments.POST("/:id/start", deploymentLifecycleHandler.StartDeployment)
+			deployments.POST("/:id/stop", deploymentLifecycleHandler.StopDeployment)
 		}
 	}
 
