@@ -27,7 +27,7 @@ type DeploymentRuntimeConfig struct {
 
 	ContainerPort int  `gorm:"not null;default:8000" json:"container_port"`
 	ServicePort   int  `gorm:"not null;default:8000" json:"service_port"`
-	HostPort      *int `json:"host_port,omitempty"`
+	HostPort      *int `gorm:"default:null" json:"host_port,omitempty"`
 
 	TensorParallelSize   int     `gorm:"not null;default:1" json:"tensor_parallel_size"`
 	PipelineParallelSize int     `gorm:"not null;default:1" json:"pipeline_parallel_size"`

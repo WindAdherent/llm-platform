@@ -248,13 +248,15 @@ func (h *DeploymentHandler) GetDeployment(c *gin.Context) {
 }
 
 type UpdateDeploymentConfigRequest struct {
-	Replicas             *int                   `json:"replicas"`
-	Description          *string                `json:"description"`
-	Image                *string                `json:"image"`
-	Port                 *int                   `json:"port"`
-	ContainerPort        *int                   `json:"container_port"`
-	ServicePort          *int                   `json:"service_port"`
-	HostPort             *int                   `json:"host_port"`
+	Replicas      *int    `json:"replicas"`
+	Description   *string `json:"description"`
+	Image         *string `json:"image"`
+	Port          *int    `json:"port"`
+	ContainerPort *int    `json:"container_port"`
+	ServicePort   *int    `json:"service_port"`
+	HostPort      *int    `json:"host_port"`
+	ClearHostPort bool    `json:"clear_host_port"`
+
 	TensorParallelSize   *int                   `json:"tensor_parallel_size"`
 	PipelineParallelSize *int                   `json:"pipeline_parallel_size"`
 	GPUMemoryUtilization *float64               `json:"gpu_memory_utilization"`
@@ -362,7 +364,9 @@ func (h *DeploymentHandler) UpdateDeploymentConfig(c *gin.Context) {
 		configUpdates["service_port"] = *req.ServicePort
 	}
 
-	if req.HostPort != nil {
+	if req.ClearHostPort {
+		configUpdates["host_port"] = nil
+	} else if req.HostPort != nil {
 		if *req.HostPort <= 0 || *req.HostPort > 65535 {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": "host_port must be between 1 and 65535",
