@@ -93,6 +93,16 @@ func NewRouter(cfg config.Config, db *gorm.DB, rdb *redis.Client, objectStorage 
 			objects.GET("", objectHandler.ListObjects)
 			objects.GET("/presigned-url", objectHandler.PresignedGetObjectURL)
 		}
+
+		deploymentHandler := api.NewDeploymentHandler(db)
+		deployments := apiV1.Group("/deployments")
+		{
+			deployments.POST("", deploymentHandler.CreateDeployment)
+			deployments.GET("", deploymentHandler.ListDeployments)
+			deployments.GET("/:id", deploymentHandler.GetDeployment)
+			deployments.PATCH("/:id/config", deploymentHandler.UpdateDeploymentConfig)
+			deployments.GET("/:id/runtime-command", deploymentHandler.GetRuntimeCommand)
+		}
 	}
 
 	return r

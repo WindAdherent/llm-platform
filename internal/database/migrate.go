@@ -11,5 +11,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&domain.Model{},
 		&domain.ModelVersion{},
 		&domain.Task{},
+		&domain.Deployment{},
+		&domain.DeploymentRuntimeConfig{},
 	)
 }
